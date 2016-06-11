@@ -1,0 +1,125 @@
+
+./flycheck_Main.hs,1603
+data FItem FItem22,23
+    FInt FInt23,24
+  | FBol FBol24,25
+  | FIdt FIdt25,26
+  | FQut FQut26,27
+  | FWrd FWrd27,28
+data FactorState FactorState30,31
+data FactorState = FactorStateFactorState30,31
+  { _vars _vars31,32
+  , _stack _stack32,33
+data FactorError FactorError34,35
+  PopEmptyStack PopEmptyStack35,36
+  TypeError TypeError36,37
+  TypeError Doc Doc | -- --36,37
+  ParseErrorParseError38,39
+newtype FactorPrimitives FactorPrimitives42,43
+newtype FactorPrimitives m = FactorPrimitivesFactorPrimitives42,43
+  { _primitives _primitives43,44
+showType showType51,52
+showType showType52,53
+instance instance58,59
+pop pop72,73
+pop pop73,74
+push push78,79
+push push79,80
+scoped scoped82,83
+scoped scoped83,84
+getNamed getNamed90,91
+getNamed getNamed94,95
+lift', sink sink101,102
+lift',lift'101,102
+lift' lift'104,105
+sink sink113,114
+class FactorType FactorType123,124
+class FactorType FactorType123,124
+class FactorType a where embed embed123,124
+popType popType127,128
+popType popType131,132
+runOp runOp136,137
+runOp runOp142,143
+fact fact144,145
+fact fact145,146
+fItem fItem155,156
+fItem fItem156,157
+tok tok163,164
+tok tok167,168
+eval eval171,172
+eval eval175,176
+initPrimitives initPrimitives177,178
+initPrimitives initPrimitives181,182
+parseWithError parseWithError211,212
+parseWithError parseWithError212,213
+repl repl216,217
+repl repl221,222
+newtype Factor Factor238,239
+newtype Factor a = FactorFactor238,239
+  { _runFactor _runFactor239,240
+main main245,246
+main main246,247
+
+./Main.hs,1603
+data FItem FItem22,23
+    FInt FInt23,24
+  | FBol FBol24,25
+  | FIdt FIdt25,26
+  | FQut FQut26,27
+  | FWrd FWrd27,28
+data FactorState FactorState30,31
+data FactorState = FactorStateFactorState30,31
+  { _vars _vars31,32
+  , _stack _stack32,33
+data FactorError FactorError34,35
+  PopEmptyStack PopEmptyStack35,36
+  TypeError TypeError36,37
+  TypeError Doc Doc | -- --36,37
+  ParseErrorParseError38,39
+newtype FactorPrimitives FactorPrimitives42,43
+newtype FactorPrimitives m = FactorPrimitivesFactorPrimitives42,43
+  { _primitives _primitives43,44
+showType showType51,52
+showType showType52,53
+instance instance58,59
+pop pop72,73
+pop pop73,74
+push push78,79
+push push79,80
+scoped scoped82,83
+scoped scoped83,84
+getNamed getNamed90,91
+getNamed getNamed94,95
+lift', sink sink101,102
+lift',lift'101,102
+lift' lift'104,105
+sink sink113,114
+class FactorType FactorType123,124
+class FactorType FactorType123,124
+class FactorType a where embed embed123,124
+popType popType127,128
+popType popType131,132
+runOp runOp136,137
+runOp runOp142,143
+fact fact144,145
+fact fact145,146
+fItem fItem155,156
+fItem fItem156,157
+tok tok163,164
+tok tok167,168
+eval eval171,172
+eval eval175,176
+initPrimitives initPrimitives177,178
+initPrimitives initPrimitives181,182
+parseWithError parseWithError211,212
+parseWithError parseWithError212,213
+repl repl216,217
+repl repl221,222
+newtype Factor Factor238,239
+newtype Factor a = FactorFactor238,239
+  { _runFactor _runFactor239,240
+main main245,246
+main main246,247
+
+./Setup.hs,15
+main main1,2

@@ -3,19 +3,18 @@ version:             0.1.0.0
 synopsis:            Initial project template from stack
 description:         Please see README.md
 homepage:            https://github.com/oisdk/FactorInterp#readme
-license:             BSD3
+license:             MIT
 license-file:        LICENSE
 author:              Donnacha Oisin Kidney
 maintainer:          oisin.kidney@gmail.com
 copyright:           MIT
-category:            Web
+category:            Data
 build-type:          Simple
 -- extra-source-files:
 cabal-version:       >=1.10
 
 
 executable FactorInterp-exe
-  -- hs-source-dirs:      app
   main-is:             Main.hs
   ghc-options:         -threaded -rtsopts -with-rtsopts=-N
   build-depends:       base

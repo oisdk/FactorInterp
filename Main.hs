@@ -1,10 +1,11 @@
 {-# LANGUAGE FlexibleContexts           #-}
 {-# LANGUAGE TemplateHaskell            #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE OverloadedLists #-}
+{-# LANGUAGE OverloadedLists            #-}
+{-# LANGUAGE OverloadedStrings          #-}
 
 import           Control.Applicative
-import           Text.Trifecta hiding (source)
+import           Text.Trifecta hiding (source, text)
 import           Text.Parser.Token.Highlight
 import           Control.Lens hiding (noneOf)
 import           Control.Monad.Reader
@@ -13,7 +14,11 @@ import           Control.Monad.Except
 import           Control.Monad.Trans.Either
 import           Data.Map.Strict            (Map, fromList)
 import           Data.Functor
-import           Text.PrettyPrint.ANSI.Leijen (putDoc)
+import           Text.PrettyPrint.ANSI.Leijen ( putDoc, Pretty(..), blue, Doc
+                                              , encloseSep, magenta, red, text
+                                              , green)
+import System.IO (hFlush, stdout)
+
 -- | Basic datatypes for Factor
 data FItem =
     FInt Integer
@@ -22,18 +27,21 @@ data FItem =
   | FQut [FItem]
   | FWrd String [FItem]
 
+-- | The state of a factors program as it runs
 data FactorState = FactorState
   { _vars  :: Map String [FItem]
   , _stack :: [FItem] }
 
 data FactorError =
   PopEmptyStack |
-  TypeError String String | -- Expected, received
-  Unrecognised String |
+  TypeError Doc Doc | -- Expected, received
+  Unrecognised Doc |
   ParseError
 
+-- | Primitive operations, parameterized over the monad m
+-- to allow IO, etc
 newtype FactorPrimitives m = FactorPrimitives
-  { _primitives :: Map String (m [String]) }
+  { _primitives :: Map String (m [Doc]) }
 
 makeLenses ''FactorState
 
@@ -41,26 +49,27 @@ makePrisms ''FItem
 
 makeLenses ''FactorPrimitives
 
-showType :: FItem -> String
-showType (FInt _  ) = "Integer"
-showType (FBol _  ) = "Bool"
-showType (FIdt _  ) = "Identifier"
-showType (FQut _  ) = "Quote"
-showType (FWrd _ _) = "Word"
+showType :: FItem -> Doc
+showType (FInt _  ) = green "Integer"
+showType (FBol _  ) = green "Bool"
+showType (FIdt _  ) = green "Identifier"
+showType (FQut _  ) = green "Quote"
+showType (FWrd _ _) = green "Word"
 
-instance Show FItem where
- show (FInt i  ) = show i
- show (FBol b  ) = show b
- show (FIdt s  ) = s
- show (FQut q  ) = unwords (["["] ++ map show q ++ ["]"])
- show (FWrd n q) = unwords ([":", n] ++ map show q ++ [";"])
+instance Pretty FItem where
+ pretty (FInt i  ) = blue (pretty i)
+ pretty (FBol b  ) = red (pretty b)
+ pretty (FIdt s  ) = magenta (text s)
+ pretty (FQut q  ) = encloseSep "[" "]" " " (map pretty q)
+ pretty (FWrd n q) = encloseSep ":" ";" " " (magenta (text n) : map pretty q)
 
-instance Show FactorError where
-  show PopEmptyStack = "Tried to pop an empty stack"
-  show (TypeError e r) = "Type error. Expected: " ++ e ++ "Received: " ++ r
-  show (Unrecognised n) = "Unrecognised name: " ++ n
-  show ParseError = "Parse error"
+instance Pretty FactorError where
+  pretty PopEmptyStack = "Tried to pop an empty stack"
+  pretty (TypeError e r) = mconcat ["Type error. Expected: ", e, ". Received: ", r]
+  pretty (Unrecognised n) = mappend "Unrecognised name: " n
+  pretty ParseError = "Parse error"
 
+-- | Try pop an item off of the stack, throwing an error on an empty stack
 pop :: (MonadError FactorError m, MonadState FactorState m) => m FItem
 pop = preuse (stack._Cons) >>= maybe (throwError PopEmptyStack) pop' where
   pop' (x,xs) = do
@@ -70,6 +79,7 @@ pop = preuse (stack._Cons) >>= maybe (throwError PopEmptyStack) pop' where
 push :: MonadState FactorState m => FItem -> m ()
 push x = stack %= cons x
 
+-- | Run an action without altering the named variables
 scoped :: MonadState FactorState m => m a -> m a
 scoped f = do
   m <- use vars
@@ -77,14 +87,15 @@ scoped f = do
   vars .= m
   pure x
 
+-- | Attempt to look up a name, throwing an error if it doesn't exist
 getNamed :: ( MonadState FactorState m
             , MonadError FactorError m
             , MonadReader (FactorPrimitives m) m )
-         => String -> m [String]
+         => String -> m [Doc]
 getNamed n =
   use (vars . at n) >>=
   maybe (view (primitives . at n) >>=
-           maybe (throwError . Unrecognised $ n)
+           maybe (throwError . Unrecognised . pretty . FIdt $ n)
                  scoped)
          eval
 
@@ -118,12 +129,10 @@ popType :: ( MonadState FactorState m
            , MonadError FactorError m
            , FactorType a )
         => m a
-popType = do
-  x <- pop
-  case matching embed' x of
-    Right y -> pure y
-    Left t -> throwError $ TypeError "" (showType t)
-    where embed' = embed
+popType = either errs pure . matching embed' =<< pop where
+  embed' = embed
+  errs t =
+    throwError $ TypeError (showType $ review (clonePrism embed') undefined) (showType t)
 
 runOp :: ( MonadState FactorState m
          , MonadError FactorError m
@@ -143,6 +152,7 @@ fact =
     Identifier
     ReservedIdentifier
 
+-- | Parser for a single factor item
 fItem :: (Monad m, TokenParsing m) => m FItem
 fItem = choice
   [ FQut <$> brackets (some fItem) <?> "Quotation"
@@ -154,8 +164,7 @@ fItem = choice
 tok :: ( MonadState FactorState m
        , MonadError FactorError m
        , MonadReader (FactorPrimitives m) m)
-    => FItem -> m [String]
-
+    => FItem -> m [Doc]
 tok (FIdt n) = getNamed n
 tok (FWrd n q) = [] <$ (vars . at n ?= q)
 tok x = [] <$ push x
@@ -163,7 +172,7 @@ tok x = [] <$ push x
 eval :: ( MonadState FactorState m
         , MonadError FactorError m
         , MonadReader (FactorPrimitives m) m )
-     => [FItem] -> m [String]
+     => [FItem] -> m [Doc]
 eval = fmap concat . traverse tok
 
 initPrimitives :: ( MonadError FactorError m
@@ -176,6 +185,7 @@ initPrimitives = FactorPrimitives (fromList m) where
     , ("/", intOp div) , ("%", intOp mod)
     , ("lift", popType >>= lift'), ("sink", popType >>= sink), ("drop", void pop)
     , ("dup", pop >>= (\x -> push x *> push x))
+    , ("&&", runOp (&&)), ("||", runOp (||))
     , ("if", bool <$> popType <*> pop <*> pop >>= push)
     , ("==", cmpOp (==)), ("!=", cmpOp (/=)), ("<=", cmpOp (<=))
     , (">=", cmpOp (>=)), ("<", cmpOp (<)), (">", cmpOp (>))
@@ -197,9 +207,7 @@ initPrimitives = FactorPrimitives (fromList m) where
     x <- pop
     case x of
       FQut q -> eval q
-      r -> pure [show r]
-    -- (".",
-    --   either (pure.show) eval . matching _FQut =<< pop)
+      r -> pure [pretty r]
 
 parseWithError :: (MonadError FactorError m, MonadIO m) => Parser a -> String -> m a
 parseWithError p s = case parseString p mempty s of
@@ -213,15 +221,18 @@ repl :: ( MonadIO m
      => m ()
 repl = forever $ do
   source <- liftIO getLine
-  parsed <- parseWithError (many fItem) source
+  parsed <- parseWithError (many fItem <* eof) source
   result <- eval parsed
   stackt <- use stack
   unless (null stackt) . liftIO $ do
     putStr "Stack : "
-    print stackt
+    putDoc $ encloseSep "" "" " " (map pretty stackt)
+    putChar '\n'
   unless (null result) . liftIO $ do
     putStr "Result: "
-    (putStrLn.unwords) result
+    putDoc $ encloseSep "" "" " " result
+    putChar '\n'
+  liftIO $ hFlush stdout
 
 -- | The Factor monad. This represents the result of evaluating a
 -- Factor program.
@@ -233,4 +244,8 @@ newtype Factor a = Factor
     , MonadReader (FactorPrimitives Factor) )
 
 main :: IO ()
-main = eitherT print pure . flip evalStateT (FactorState mempty []) . flip runReaderT initPrimitives . _runFactor $ repl
+main =
+  eitherT (putDoc.pretty) pure .
+  flip evalStateT (FactorState mempty []) .
+  flip runReaderT initPrimitives .
+  _runFactor $ repl
