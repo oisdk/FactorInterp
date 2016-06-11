@@ -5,19 +5,20 @@
 {-# LANGUAGE OverloadedStrings          #-}
 
 import           Control.Applicative
-import           Text.Trifecta hiding (source, text)
+import           Text.Trifecta         hiding (source, text)
 import           Text.Parser.Token.Highlight
-import           Control.Lens hiding (noneOf)
+import           Control.Lens          hiding (noneOf)
 import           Control.Monad.Reader
 import           Control.Monad.State
 import           Control.Monad.Except
 import           Control.Monad.Trans.Either
-import           Data.Map.Strict            (Map, fromList)
+import           Data.Map.Strict              (Map, fromList)
 import           Data.Functor
 import           Text.PrettyPrint.ANSI.Leijen ( putDoc, Pretty(..), blue, Doc
                                               , encloseSep, magenta, red, text
                                               , green, yellow)
-import           System.IO (hFlush, stdout)
+import           System.IO                    (hFlush, stdout)
+import           System.Environment           (getArgs)
 
 -- | Basic datatypes for Factor
 data FItem =
@@ -193,6 +194,9 @@ parseWithError p s = case parseString p mempty s of
   Success x -> pure x
   Failure f -> liftIO (putDoc f) *> throwError ParseError
 
+factor :: Parser [FItem]
+factor = whiteSpace *> many fItem <* eof
+
 repl :: ( MonadIO m
         , MonadState FactorState m
         , MonadError FactorError m
@@ -200,7 +204,7 @@ repl :: ( MonadIO m
      => m ()
 repl = forever $ do
   source <- liftIO getLine
-  parsed <- parseWithError (many fItem <* eof) source
+  parsed <- parseWithError factor source
   result <- eval parsed
   stackt <- use stack
   unless (null stackt) . liftIO $ do
@@ -214,20 +218,41 @@ repl = forever $ do
   liftIO $ hFlush stdout
 
 -- | The Factor monad. This represents the result of evaluating a
--- Factor program.
-newtype Factor a = Factor
-  { _runFactor :: ReaderT (FactorPrimitives Factor)
+-- Factor program. It's parameterised over the monad m, to allow
+-- different effects to be interleaved with evaluation. For instance,
+-- Factor IO represents the repl.
+newtype Factor m a = Factor
+  { _runFactor :: ReaderT (FactorPrimitives (Factor m))
                  (StateT FactorState
-                 (EitherT FactorError IO))
+                 (EitherT FactorError m))
                   a
   } deriving
     ( Functor, Applicative, Monad, MonadIO
     , MonadError FactorError, MonadState FactorState
-    , MonadReader (FactorPrimitives Factor) )
+    , MonadReader (FactorPrimitives (Factor m)) )
+
+evalFactor :: Monad m => Factor m a -> m (Either Doc a)
+evalFactor = (mapped._Left %~ pretty)
+           . runEitherT
+           . flip evalStateT (FactorState mempty [])
+           . flip runReaderT initPrimitives
+           . _runFactor
 
 main :: IO ()
-main =
-  (eitherT (putDoc.pretty) pure .
-  flip evalStateT (FactorState mempty []) .
-  flip runReaderT initPrimitives .
-  _runFactor $ repl) *> putChar '\n'
+main = do
+  args <- getArgs
+  forM_ args fromFile
+  when (null args) $ do
+    result <- evalFactor repl
+    either putDoc pure result
+    putChar '\n'
+
+fromFile :: String -> IO ()
+fromFile n = do
+  result <- parseFromFile factor n
+  void . flip _Just result $ \x -> do
+    case (runIdentity . evalFactor . eval) x of
+      Right r -> putDoc $ encloseSep "" "" " " r
+      Left f -> putDoc f
+    putChar '\n'
+    hFlush stdout
