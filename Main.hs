@@ -16,8 +16,8 @@ import           Data.Map.Strict            (Map, fromList)
 import           Data.Functor
 import           Text.PrettyPrint.ANSI.Leijen ( putDoc, Pretty(..), blue, Doc
                                               , encloseSep, magenta, red, text
-                                              , green)
-import System.IO (hFlush, stdout)
+                                              , green, yellow)
+import           System.IO (hFlush, stdout)
 
 -- | Basic datatypes for Factor
 data FItem =
@@ -60,14 +60,16 @@ instance Pretty FItem where
  pretty (FInt i  ) = blue (pretty i)
  pretty (FBol b  ) = red (pretty b)
  pretty (FIdt s  ) = magenta (text s)
- pretty (FQut q  ) = encloseSep "[" "]" " " (map pretty q)
- pretty (FWrd n q) = encloseSep ":" ";" " " (magenta (text n) : map pretty q)
+ pretty (FQut q  ) =
+   encloseSep (yellow "[ ") (yellow " ]") " " (map pretty q)
+ pretty (FWrd n q) =
+   encloseSep (yellow ": ") (yellow " ;") " " (magenta (text n) : map pretty q)
 
 instance Pretty FactorError where
   pretty PopEmptyStack = "Tried to pop an empty stack"
   pretty (TypeError e r) = mconcat ["Type error. Expected: ", e, ". Received: ", r]
   pretty (Unrecognised n) = mappend "Unrecognised name: " n
-  pretty ParseError = "Parse error"
+  pretty ParseError = ""
 
 -- | Try pop an item off of the stack, throwing an error on an empty stack
 pop :: (MonadError FactorError m, MonadState FactorState m) => m FItem
@@ -120,32 +122,10 @@ sink = sink' . max 1 where
     sink' (n-1)
     push y
 
--- | A class for Haskell types which have an equivalent Factor type
-class FactorType a where embed :: Prism' FItem a
-instance FactorType Integer where embed = _FInt
-instance FactorType Bool where embed = _FBol
-
-popType :: ( MonadState FactorState m
-           , MonadError FactorError m
-           , FactorType a )
-        => m a
-popType = either errs pure . matching embed' =<< pop where
-  embed' = embed
-  errs t =
-    throwError $ TypeError (showType $ review (clonePrism embed') undefined) (showType t)
-
-runOp :: ( MonadState FactorState m
-         , MonadError FactorError m
-         , FactorType a
-         , FactorType b
-         , FactorType c )
-      => (a -> b -> c) -> m ()
-runOp f = f <$> popType <*> popType >>= push . review embed
-
 fact :: CharParsing m => IdentifierStyle m
 fact =
   IdentifierStyle
-    "factor"
+    "identifier"
     (noneOf "0123456789[]: \t\r\n")
     (noneOf " \t\r\n")
     ["[", "]", ":", "True", "False"]
@@ -159,7 +139,7 @@ fItem = choice
   , FWrd <$> (colon *> ident fact) <*> (some fItem <* semi) <?> "Word"
   , FBol <$> (reserve fact "True" $> True <|> reserve fact "False" $> False) <?> "Boolean"
   , FInt <$> natural <?> "integer"
-  , FIdt <$> ident fact <?> "identifier" ]
+  , FIdt <$> ident fact ]
 
 tok :: ( MonadState FactorState m
        , MonadError FactorError m
@@ -183,24 +163,23 @@ initPrimitives = FactorPrimitives (fromList m) where
   m = (".", dot') : map (_2.mapped .~ [])
     [ ("+", intOp (+)), ("-", intOp (-)), ("*", intOp (*))
     , ("/", intOp div) , ("%", intOp mod)
-    , ("lift", popType >>= lift'), ("sink", popType >>= sink), ("drop", void pop)
+    , ("lift", popInt >>= lift'), ("sink", popInt >>= sink), ("drop", void pop)
     , ("dup", pop >>= (\x -> push x *> push x))
-    , ("&&", runOp (&&)), ("||", runOp (||))
-    , ("if", bool <$> popType <*> pop <*> pop >>= push)
+    , ("&&", bolOp (&&)), ("||", bolOp (||))
+    , ("if", bool <$> popBool <*> pop <*> pop >>= push)
     , ("==", cmpOp (==)), ("!=", cmpOp (/=)), ("<=", cmpOp (<=))
     , (">=", cmpOp (>=)), ("<", cmpOp (<)), (">", cmpOp (>))
-    , ("!", not <$> popType >>= push . review embed)
+    , ("!", not <$> popBool >>= push . FBol)
     , ("clear", stack .= [])
     , ("freeze", stack %= (pure . FQut))
     , ("empty", FBol <$> uses stack null >>= push)]
-  cmpOp =
-    runOp :: (MonadState FactorState m, MonadError FactorError m)
-          => (Integer -> Integer -> Bool)
-          -> m ()
-  intOp =
-    runOp :: (MonadState FactorState m, MonadError FactorError m)
-          => (Integer -> Integer -> Integer)
-          -> m ()
+  cmpOp o = o <$> popInt <*> popInt >>= push . FBol
+  intOp o = o <$> popInt <*> popInt >>= push . FInt
+  bolOp o = o <$> popBool <*> popBool >>= push . FBol
+  popInt = popType _FInt (green "Integer")
+  popBool = popType _FBol (green "Bool")
+  popType p d = pop >>= either errs pure . matching p where
+    errs = throwError . TypeError d . showType
   bool True  t _ = t
   bool False _ f = f
   dot' = do
@@ -237,7 +216,10 @@ repl = forever $ do
 -- | The Factor monad. This represents the result of evaluating a
 -- Factor program.
 newtype Factor a = Factor
-  { _runFactor :: ReaderT (FactorPrimitives Factor) (StateT FactorState (EitherT FactorError IO)) a
+  { _runFactor :: ReaderT (FactorPrimitives Factor)
+                 (StateT FactorState
+                 (EitherT FactorError IO))
+                  a
   } deriving
     ( Functor, Applicative, Monad, MonadIO
     , MonadError FactorError, MonadState FactorState
@@ -245,7 +227,7 @@ newtype Factor a = Factor
 
 main :: IO ()
 main =
-  eitherT (putDoc.pretty) pure .
+  (eitherT (putDoc.pretty) pure .
   flip evalStateT (FactorState mempty []) .
   flip runReaderT initPrimitives .
-  _runFactor $ repl
+  _runFactor $ repl) *> putChar '\n'
